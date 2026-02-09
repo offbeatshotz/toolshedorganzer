@@ -43,9 +43,13 @@
     <header class="flex justify-between items-center mb-4 shrink-0">
         <div>
             <h1 class="text-2xl font-bold text-green-400">🛠️ Workbench Layout Grid</h1>
-            <p class="text-xs text-slate-400">Drag images into tiles or use camera • No-Scroll Interface</p>
+            <p class="text-xs text-slate-400">Live Preview • Multiple Items • Randomizer • No-Scroll</p>
         </div>
         <div class="flex gap-4">
+            <button id="global-randomize" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                Randomize All
+            </button>
             <button id="global-reset" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-sm font-medium transition">Reset Grid</button>
             <div id="status-bar" class="text-sm font-mono text-green-500 bg-slate-800 px-3 py-2 rounded-lg border border-slate-700">System Ready</div>
         </div>
@@ -80,11 +84,11 @@
                 this.el.appendChild(this.canvas);
                 
                 this.originalImg = null;
-                this.cutout = null;
-                this.mode = 'empty'; // empty, base, select, move
+                this.items = []; // Array of { data, x, y, w, h, origX, origY }
+                this.mode = 'empty'; // empty, preview, base, select, move
                 this.selection = { x: 0, y: 0, w: 0, h: 0 };
-                this.currentPos = { x: 0, y: 0 };
                 this.isDragging = false;
+                this.activeItemIndex = -1;
 
                 this.renderEmpty();
                 this.initEvents();
@@ -96,11 +100,13 @@
                         <svg class="w-10 h-10 mb-2 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                         </svg>
-                        <p class="text-xs text-slate-400 font-medium">Drop Image or Click to Snap</p>
+                        <p class="text-[10px] text-slate-400 font-medium text-center px-2 uppercase tracking-tighter">Drop Image or Click to Live Preview</p>
                     </div>
                     <div class="tile-controls hidden" id="controls-${this.index}">
+                        <button class="btn-snap bg-green-600 hover:bg-green-500 text-[10px] px-2 py-1 rounded grow font-bold uppercase hidden">Snap</button>
                         <button class="btn-select bg-blue-600 hover:bg-blue-500 text-[10px] px-2 py-1 rounded grow font-bold uppercase">Select</button>
-                        <button class="btn-lock bg-green-600 hover:bg-green-500 text-[10px] px-2 py-1 rounded grow font-bold uppercase hidden">Lock</button>
+                        <button class="btn-lock bg-purple-600 hover:bg-purple-500 text-[10px] px-2 py-1 rounded grow font-bold uppercase hidden">Lock</button>
+                        <button class="btn-random bg-orange-600 hover:bg-orange-500 text-[10px] px-2 py-1 rounded grow font-bold uppercase hidden">Mix</button>
                         <button class="btn-clear bg-slate-700 hover:bg-slate-600 text-[10px] px-2 py-1 rounded font-bold uppercase">X</button>
                     </div>
                 `;
@@ -124,9 +130,9 @@
                     }
                 });
 
-                // Click to Snap
+                // Click to Start Preview
                 this.el.addEventListener('click', (e) => {
-                    if (this.mode === 'empty') this.snapPhoto();
+                    if (this.mode === 'empty') this.startPreview();
                 });
 
                 // Controls
@@ -135,8 +141,10 @@
                     if (!btn) return;
                     e.stopPropagation();
 
+                    if (btn.classList.contains('btn-snap')) this.captureFrame();
                     if (btn.classList.contains('btn-select')) this.startSelection();
                     if (btn.classList.contains('btn-lock')) this.lockSelection();
+                    if (btn.classList.contains('btn-random')) this.randomizeLayout();
                     if (btn.classList.contains('btn-clear')) this.reset();
                 });
 
@@ -144,6 +152,43 @@
                 this.canvas.addEventListener('mousedown', (e) => this.handleDown(e));
                 this.canvas.addEventListener('mousemove', (e) => this.handleMove(e));
                 window.addEventListener('mouseup', () => this.handleUp());
+            }
+
+            async startPreview() {
+                try {
+                    if (!activeStream) {
+                        activeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                        video.srcObject = activeStream;
+                    }
+                    this.mode = 'preview';
+                    this.canvas.classList.remove('hidden');
+                    this.el.querySelector('.tile-overlay').classList.add('hidden');
+                    this.el.querySelector('.tile-controls').classList.remove('hidden');
+                    this.el.querySelector('.btn-snap').classList.remove('hidden');
+                    this.el.querySelector('.btn-select').classList.add('hidden');
+                    
+                    this.canvas.width = this.el.clientWidth * window.devicePixelRatio;
+                    this.canvas.height = this.el.clientHeight * window.devicePixelRatio;
+
+                    const updatePreview = () => {
+                        if (this.mode !== 'preview') return;
+                        this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
+                        requestAnimationFrame(updatePreview);
+                    };
+                    updatePreview();
+                    statusBar.innerText = `Live Preview Tile ${this.index}`;
+                } catch (err) {
+                    statusBar.innerText = "Camera Access Denied";
+                }
+            }
+
+            captureFrame() {
+                this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
+                this.originalImg = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                this.mode = 'base';
+                this.el.querySelector('.btn-snap').classList.add('hidden');
+                this.el.querySelector('.btn-select').classList.remove('hidden');
+                statusBar.innerText = `Snapped Tile ${this.index}`;
             }
 
             loadImage(url) {
@@ -192,27 +237,61 @@
             }
 
             lockSelection() {
-                if (this.selection.w === 0) return;
-                this.cutout = this.ctx.getImageData(this.selection.x, this.selection.y, this.selection.w, this.selection.h);
-                this.currentPos = { x: this.selection.x, y: this.selection.y };
+                if (Math.abs(this.selection.w) < 5 || Math.abs(this.selection.h) < 5) return;
+                
+                // Sort coordinates for ImageData
+                const sx = this.selection.w > 0 ? this.selection.x : this.selection.x + this.selection.w;
+                const sy = this.selection.h > 0 ? this.selection.y : this.selection.y + this.selection.h;
+                const sw = Math.abs(this.selection.w);
+                const sh = Math.abs(this.selection.h);
+
+                const cutoutData = this.ctx.getImageData(sx, sy, sw, sh);
+                
+                this.items.push({
+                    data: cutoutData,
+                    x: sx, y: sy, w: sw, h: sh,
+                    origX: sx, origY: sy
+                });
+
                 this.mode = 'move';
-                this.el.querySelector('.btn-lock').innerText = "DONE";
-                statusBar.innerText = "Drag to Move Workbench";
+                this.el.querySelector('.btn-lock').classList.add('hidden');
+                this.el.querySelector('.btn-select').classList.remove('hidden');
+                this.el.querySelector('.btn-random').classList.remove('hidden');
+                this.selection = { x: 0, y: 0, w: 0, h: 0 };
+                this.draw();
+                statusBar.innerText = "Item Added! Drag to move or Select more.";
+            }
+
+            randomizeLayout() {
+                if (this.items.length === 0) return;
+                const padding = 20;
+                this.items.forEach(item => {
+                    item.x = padding + Math.random() * (this.canvas.width - item.w - padding * 2);
+                    item.y = padding + Math.random() * (this.canvas.height - item.h - padding * 2);
+                });
+                this.draw();
+                statusBar.innerText = "Layout Randomized";
             }
 
             handleDown(e) {
+                const rect = this.canvas.getBoundingClientRect();
+                const mx = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+                const my = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+
                 if (this.mode === 'select') {
-                    const rect = this.canvas.getBoundingClientRect();
-                    this.selection.x = (e.clientX - rect.left) * (this.canvas.width / rect.width);
-                    this.selection.y = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+                    this.selection.x = mx;
+                    this.selection.y = my;
                     this.isDragging = true;
-                } else if (this.mode === 'move') {
-                    const rect = this.canvas.getBoundingClientRect();
-                    const mx = (e.clientX - rect.left) * (this.canvas.width / rect.width);
-                    const my = (e.clientY - rect.top) * (this.canvas.height / rect.height);
-                    if (mx >= this.currentPos.x && mx <= this.currentPos.x + this.selection.w &&
-                        my >= this.currentPos.y && my <= this.currentPos.y + this.selection.h) {
-                        this.isDragging = true;
+                } else {
+                    // Check if clicking an existing item (from top to bottom)
+                    for (let i = this.items.length - 1; i >= 0; i--) {
+                        const it = this.items[i];
+                        if (mx >= it.x && mx <= it.x + it.w && my >= it.y && my <= it.y + it.h) {
+                            this.activeItemIndex = i;
+                            this.isDragging = true;
+                            this.mode = 'move';
+                            break;
+                        }
                     }
                 }
             }
@@ -226,43 +305,58 @@
                 if (this.mode === 'select') {
                     this.selection.w = mx - this.selection.x;
                     this.selection.h = my - this.selection.y;
-                } else if (this.mode === 'move') {
-                    this.currentPos.x = mx - this.selection.w / 2;
-                    this.currentPos.y = my - this.selection.h / 2;
+                } else if (this.mode === 'move' && this.activeItemIndex !== -1) {
+                    const it = this.items[this.activeItemIndex];
+                    it.x = mx - it.w / 2;
+                    it.y = my - it.h / 2;
                 }
                 this.draw();
             }
 
             handleUp() {
                 this.isDragging = false;
+                this.activeItemIndex = -1;
             }
 
             draw() {
+                if (!this.originalImg) return;
                 this.ctx.putImageData(this.originalImg, 0, 0);
+                
+                // Blur/Fill original areas of ALL items
+                this.items.forEach(it => {
+                    this.ctx.fillStyle = '#0f172a';
+                    this.ctx.fillRect(it.origX, it.origY, it.w, it.h);
+                });
+
+                // Draw all items at their new positions
+                this.items.forEach(it => {
+                    this.ctx.putImageData(it.data, it.x, it.y);
+                    this.ctx.strokeStyle = '#22c55e';
+                    this.ctx.lineWidth = 1;
+                    this.ctx.strokeRect(it.x, it.y, it.w, it.h);
+                });
+
                 if (this.mode === 'select') {
                     this.ctx.strokeStyle = '#3b82f6';
                     this.ctx.lineWidth = 4;
                     this.ctx.strokeRect(this.selection.x, this.selection.y, this.selection.w, this.selection.h);
-                } else if (this.mode === 'move') {
-                    this.ctx.fillStyle = '#0f172a';
-                    this.ctx.fillRect(this.selection.x, this.selection.y, this.selection.w, this.selection.h);
-                    this.ctx.putImageData(this.cutout, this.currentPos.x, this.currentPos.y);
-                    this.ctx.strokeStyle = '#22c55e';
-                    this.ctx.lineWidth = 2;
-                    this.ctx.strokeRect(this.currentPos.x, this.currentPos.y, this.selection.w, this.selection.h);
                 }
             }
 
             reset() {
                 this.mode = 'empty';
                 this.originalImg = null;
-                this.cutout = null;
+                this.items = [];
                 this.selection = { x: 0, y: 0, w: 0, h: 0 };
                 this.renderEmpty();
             }
         }
 
         const simInstances = Array.from(tiles).map((tile, idx) => new TileSimulator(tile, idx));
+
+        document.getElementById('global-randomize').addEventListener('click', () => {
+            simInstances.forEach(s => s.randomizeLayout());
+        });
 
         document.getElementById('global-reset').addEventListener('click', () => {
             simInstances.forEach(s => s.reset());
