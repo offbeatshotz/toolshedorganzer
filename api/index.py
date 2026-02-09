@@ -8,64 +8,86 @@ from PIL import Image
 app = Flask(__name__, template_folder='../templates')
 
 def detect_workbenches(image):
-    # Convert to grayscale and detect edges
+    # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edged = cv2.Canny(blurred, 30, 150)
     
-    # Find contours
-    contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Use Canny with wider thresholds for better edge capture
+    edged = cv2.Canny(gray, 50, 200)
+    
+    # Use Probabilistic Hough Line Transform to find line segments
+    # This is much better for finding "legs" and "table tops"
+    lines = cv2.HoughLinesP(edged, 1, np.pi/180, threshold=50, minLineLength=40, maxLineGap=10)
     
     detected = []
     output = image.copy()
     
-    # Step 1: Find potential tops (horizontal rectangles)
-    potential_tops = []
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < 3000: continue
+    if lines is not None:
+        horizontal_lines = []
+        vertical_lines = []
         
-        x, y, w, h = cv2.boundingRect(cnt)
-        aspect_ratio = float(w)/h
-        
-        # Table tops are usually wider than they are tall
-        if aspect_ratio > 1.5:
-            potential_tops.append({'x': x, 'y': y, 'w': w, 'h': h, 'cnt': cnt})
-
-    # Step 2: For each top, look for legs beneath it
-    for top in potential_tops:
-        # Define search area for legs (directly below the top)
-        leg_search_y = top['y'] + top['h']
-        leg_search_h = int(top['h'] * 3) # Look down 3x the top's height
-        
-        # Look for vertical contours in the search area
-        legs_found = 0
-        for cnt in contours:
-            lx, ly, lw, lh = cv2.boundingRect(cnt)
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            dx = abs(x2 - x1)
+            dy = abs(y2 - y1)
             
-            # Is this contour below the current top and within its horizontal span?
-            if (ly >= leg_search_y and ly <= leg_search_y + leg_search_h and 
-                lx >= top['x'] - 20 and lx + lw <= top['x'] + top['w'] + 20):
+            # Categorize lines by orientation
+            if dx > dy * 3: # Horizontal
+                horizontal_lines.append(line[0])
+                # Draw horizontal lines in green (internal debug)
+                # cv2.line(output, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            elif dy > dx * 2: # Vertical
+                vertical_lines.append(line[0])
+                # Draw vertical lines in orange (internal debug)
+                # cv2.line(output, (x1, y1), (x2, y2), (0, 165, 255), 2)
+
+        # Step 2: Match legs to tops
+        # For each horizontal line (potential top), see if there are vertical lines (legs) near its ends
+        processed_tops = []
+        for h_line in horizontal_lines:
+            hx1, hy1, hx2, hy2 = h_line
+            # Sort endpoints left-to-right
+            if hx1 > hx2: hx1, hy1, hx2, hy2 = hx2, hy2, hx1, hy1
+            
+            legs_for_this_top = 0
+            leg_y_max = hy1
+            
+            for v_line in vertical_lines:
+                vx1, vy1, vx2, vy2 = v_line
+                # Sort endpoints top-to-bottom
+                if vy1 > vy2: vx1, vy1, vx2, vy2 = vx2, vy2, vx1, vy1
                 
-                # Legs are usually taller than they are wide
-                leg_aspect = float(lh)/lw if lw > 0 else 0
-                if leg_aspect > 1.2 and cv2.contourArea(cnt) > 500:
-                    legs_found += 1
-                    # Draw legs in a different color for debugging/visuals
-                    cv2.rectangle(output, (lx, ly), (lx + lw, ly + lh), (255, 165, 0), 2)
+                # Check if vertical line starts near the horizontal line and is below it
+                # Relaxed proximity: within 30 pixels horizontally of the top's span
+                if (vy1 >= hy1 - 20 and vy1 <= hy1 + 50 and 
+                    vx1 >= hx1 - 30 and vx1 <= hx2 + 30):
+                    legs_for_this_top += 1
+                    leg_y_max = max(leg_y_max, vy2)
+                    # Highlight the detected leg
+                    cv2.line(output, (vx1, vy1), (vx2, vy2), (0, 165, 255), 3)
 
-        # Step 3: If it has a top and at least one leg-like structure, it's a workbench/table
-        if legs_found >= 1:
-            x, y, w, h = top['x'], top['y'], top['w'], top['h']
-            # Expand bounding box to include legs
-            total_h = leg_search_h + h
-            detected.append({'x': x, 'y': y, 'w': w, 'h': total_h, 'type': 'Workbench/Table'})
-            
-            # Draw main detection
-            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 3)
-            cv2.putText(output, f"Workbench (Legs: {legs_found})", (x, y - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
+            # If we found a horizontal surface with at least 1 leg (usually 2+ but 1 is safer for side views)
+            if legs_for_this_top >= 1:
+                # Group nearby horizontal lines to avoid duplicate detections
+                is_duplicate = False
+                for p_top in processed_tops:
+                    if abs(p_top[1] - hy1) < 40: # Same vertical level
+                        is_duplicate = True
+                        break
+                
+                if not is_duplicate:
+                    w = hx2 - hx1
+                    h = leg_y_max - hy1
+                    detected.append({
+                        'x': int(hx1), 'y': int(hy1), 'w': int(w), 'h': int(h), 
+                        'type': f'Workbench ({legs_for_this_top} legs)'
+                    })
+                    processed_tops.append((hx1, hy1, hx2, hy2))
+                    
+                    # Draw main detection
+                    cv2.rectangle(output, (hx1, hy1), (hx2, leg_y_max), (0, 255, 0), 3)
+                    cv2.putText(output, "WORKSTATION", (hx1, hy1 - 10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
     return output, detected
 
 @app.route('/')
