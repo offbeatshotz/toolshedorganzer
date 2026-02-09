@@ -3,212 +3,271 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Workbench Move Simulator</title>
+    <title>Workbench Grid Simulator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        #canvas-container { position: relative; display: inline-block; }
-        canvas { border: 2px solid #333; cursor: crosshair; max-width: 100%; height: auto; }
-        .controls { background: #1a1a1a; color: white; padding: 20px; border-radius: 10px; }
-        #video { display: none; }
+        body { background-color: #0f172a; color: #f8fafc; }
+        .tile { 
+            position: relative; 
+            border: 2px dashed #334155; 
+            border-radius: 0.75rem; 
+            overflow: hidden; 
+            background: #1e293b;
+            transition: all 0.3s ease;
+        }
+        .tile.drag-over { border-color: #22c55e; background: #064e3b; }
+        .tile-canvas { width: 100%; height: 100%; object-fit: contain; cursor: crosshair; }
+        .tile-overlay { 
+            position: absolute; 
+            inset: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            pointer-events: none;
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .tile-controls {
+            position: absolute;
+            bottom: 0.5rem;
+            left: 0.5rem;
+            right: 0.5rem;
+            display: flex;
+            gap: 0.5rem;
+            pointer-events: auto;
+        }
+        #video-preview { position: fixed; top: -1000px; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen p-4 md:p-8">
-    <div class="max-w-6xl mx-auto">
-        <header class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-green-400">🛠️ Workbench Re-positioner</h1>
-            <p class="text-gray-400 mt-2">Vercel Edition • Drag to move your workspace</p>
-        </header>
-
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            <!-- Sidebar Controls -->
-            <div class="lg:col-span-1 space-y-6">
-                <div class="controls shadow-xl">
-                    <h2 class="text-xl font-semibold mb-4 text-green-400">1. Capture</h2>
-                    <button id="capture-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition mb-4 flex items-center justify-center gap-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        </svg>
-                        Snap Photo
-                    </button>
-                    
-                    <h2 class="text-xl font-semibold mb-4 text-green-400">2. Select</h2>
-                    <p class="text-xs text-gray-400 mb-2 italic">Drag a box over your workbench to "cut" it out.</p>
-                    <button id="lock-selection" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition mb-4">
-                        Lock Selection
-                    </button>
-
-                    <h2 class="text-xl font-semibold mb-4 text-green-400">3. Move</h2>
-                    <p class="text-xs text-gray-400 mb-2 italic">Now drag the cutout to a new spot!</p>
-                    
-                    <button id="reset-btn" class="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition mt-8">
-                        Reset All
-                    </button>
-                </div>
-                
-                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                    <h3 class="font-bold text-sm uppercase text-gray-500 mb-2">Instructions</h3>
-                    <ul class="text-xs space-y-2 text-gray-300">
-                        <li>📸 Click <b>Snap Photo</b> to start.</li>
-                        <li>🖱️ <b>Drag</b> a rectangle over your workbench.</li>
-                        <li>🔒 Click <b>Lock Selection</b>.</li>
-                        <li>🚀 <b>Drag</b> the workbench to its new position!</li>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Main Workspace -->
-            <div class="lg:col-span-3">
-                <div id="canvas-container" class="w-full bg-black rounded-xl overflow-hidden shadow-2xl flex justify-center items-center min-h-[400px]">
-                    <video id="video" autoplay playsinline></video>
-                    <canvas id="canvas"></canvas>
-                    <div id="loading-hint" class="absolute text-gray-500 text-center">
-                        <p>Camera feed will appear here...</p>
-                    </div>
-                </div>
-                <div class="mt-4 flex justify-between items-center text-sm text-gray-500">
-                    <span id="status">Status: Waiting for camera...</span>
-                    <button id="download-btn" class="text-green-400 hover:text-green-300 font-bold hidden">
-                        Download Result ↓
-                    </button>
-                </div>
-            </div>
+<body class="h-screen w-screen overflow-hidden flex flex-col p-4">
+    <header class="flex justify-between items-center mb-4 shrink-0">
+        <div>
+            <h1 class="text-2xl font-bold text-green-400">🛠️ Workbench Layout Grid</h1>
+            <p class="text-xs text-slate-400">Drag images into tiles or use camera • No-Scroll Interface</p>
         </div>
-    </div>
+        <div class="flex gap-4">
+            <button id="global-reset" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-sm font-medium transition">Reset Grid</button>
+            <div id="status-bar" class="text-sm font-mono text-green-500 bg-slate-800 px-3 py-2 rounded-lg border border-slate-700">System Ready</div>
+        </div>
+    </header>
+
+    <main class="grow grid grid-cols-2 md:grid-cols-3 gap-4 overflow-hidden">
+        <!-- 6 Simulation Tiles -->
+        <div class="tile" id="tile-0"></div>
+        <div class="tile" id="tile-1"></div>
+        <div class="tile" id="tile-2"></div>
+        <div class="tile" id="tile-3"></div>
+        <div class="tile" id="tile-4"></div>
+        <div class="tile" id="tile-5"></div>
+    </main>
+
+    <video id="video-preview" autoplay playsinline></video>
 
     <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const status = document.getElementById('status');
-        const captureBtn = document.getElementById('capture-btn');
-        const lockBtn = document.getElementById('lock-selection');
-        const resetBtn = document.getElementById('reset-btn');
-        const downloadBtn = document.getElementById('download-btn');
-        const hint = document.getElementById('loading-hint');
+        const tiles = document.querySelectorAll('.tile');
+        const video = document.getElementById('video-preview');
+        const statusBar = document.getElementById('status-bar');
+        
+        let activeStream = null;
 
-        let originalImage = null;
-        let workbenchCutout = null;
-        let isSelecting = false;
-        let isMoving = false;
-        let selection = { x: 0, y: 0, w: 0, h: 0 };
-        let currentPos = { x: 0, y: 0 };
-        let mode = 'idle'; // idle, capture, select, move
+        class TileSimulator {
+            constructor(element, index) {
+                this.el = element;
+                this.index = index;
+                this.canvas = document.createElement('canvas');
+                this.canvas.className = 'tile-canvas hidden';
+                this.ctx = this.canvas.getContext('2d');
+                this.el.appendChild(this.canvas);
+                
+                this.originalImg = null;
+                this.cutout = null;
+                this.mode = 'empty'; // empty, base, select, move
+                this.selection = { x: 0, y: 0, w: 0, h: 0 };
+                this.currentPos = { x: 0, y: 0 };
+                this.isDragging = false;
 
-        // Initialize Camera
-        async function startCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                video.srcObject = stream;
-                video.style.display = 'block';
-                hint.style.display = 'none';
-                mode = 'capture';
-                status.innerText = "Status: Ready to snap!";
-            } catch (err) {
-                status.innerText = "Error: Camera access denied";
-                console.error(err);
+                this.renderEmpty();
+                this.initEvents();
             }
-        }
 
-        captureBtn.addEventListener('click', () => {
-            if (mode !== 'capture') return;
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
-            originalImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            video.style.display = 'none';
-            mode = 'select';
-            status.innerText = "Status: Drag to select workbench area";
-        });
+            renderEmpty() {
+                this.el.innerHTML = `
+                    <div class="tile-overlay" id="overlay-${this.index}">
+                        <svg class="w-10 h-10 mb-2 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                        <p class="text-xs text-slate-400 font-medium">Drop Image or Click to Snap</p>
+                    </div>
+                    <div class="tile-controls hidden" id="controls-${this.index}">
+                        <button class="btn-select bg-blue-600 hover:bg-blue-500 text-[10px] px-2 py-1 rounded grow font-bold uppercase">Select</button>
+                        <button class="btn-lock bg-green-600 hover:bg-green-500 text-[10px] px-2 py-1 rounded grow font-bold uppercase hidden">Lock</button>
+                        <button class="btn-clear bg-slate-700 hover:bg-slate-600 text-[10px] px-2 py-1 rounded font-bold uppercase">X</button>
+                    </div>
+                `;
+                this.el.appendChild(this.canvas);
+                this.canvas.classList.add('hidden');
+            }
 
-        canvas.addEventListener('mousedown', e => {
-            if (mode === 'select') {
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                selection.x = (e.clientX - rect.left) * scaleX;
-                selection.y = (e.clientY - rect.top) * scaleY;
-                isSelecting = true;
-            } else if (mode === 'move') {
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                const mx = (e.clientX - rect.left) * scaleX;
-                const my = (e.clientY - rect.top) * scaleY;
+            initEvents() {
+                // Drag and Drop
+                this.el.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.el.classList.add('drag-over');
+                });
+                this.el.addEventListener('dragleave', () => this.el.classList.remove('drag-over'));
+                this.el.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.el.classList.remove('drag-over');
+                    const file = e.dataTransfer.files[0];
+                    if (file && file.type.startsWith('image/')) {
+                        this.loadImage(URL.createObjectURL(file));
+                    }
+                });
 
-                // Check if clicking inside the workbench
-                if (mx >= currentPos.x && mx <= currentPos.x + selection.w &&
-                    my >= currentPos.y && my <= currentPos.y + selection.h) {
-                    isMoving = true;
+                // Click to Snap
+                this.el.addEventListener('click', (e) => {
+                    if (this.mode === 'empty') this.snapPhoto();
+                });
+
+                // Controls
+                this.el.addEventListener('click', (e) => {
+                    const btn = e.target.closest('button');
+                    if (!btn) return;
+                    e.stopPropagation();
+
+                    if (btn.classList.contains('btn-select')) this.startSelection();
+                    if (btn.classList.contains('btn-lock')) this.lockSelection();
+                    if (btn.classList.contains('btn-clear')) this.reset();
+                });
+
+                // Canvas Interaction
+                this.canvas.addEventListener('mousedown', (e) => this.handleDown(e));
+                this.canvas.addEventListener('mousemove', (e) => this.handleMove(e));
+                window.addEventListener('mouseup', () => this.handleUp());
+            }
+
+            loadImage(url) {
+                const img = new Image();
+                img.onload = () => {
+                    this.canvas.width = this.el.clientWidth * window.devicePixelRatio;
+                    this.canvas.height = this.el.clientHeight * window.devicePixelRatio;
+                    this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+                    this.originalImg = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                    this.canvas.classList.remove('hidden');
+                    this.el.querySelector('.tile-overlay').classList.add('hidden');
+                    this.el.querySelector('.tile-controls').classList.remove('hidden');
+                    this.mode = 'base';
+                    statusBar.innerText = `Tile ${this.index} Loaded`;
+                };
+                img.src = url;
+            }
+
+            async snapPhoto() {
+                try {
+                    if (!activeStream) {
+                        activeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                        video.srcObject = activeStream;
+                    }
+                    setTimeout(() => {
+                        this.canvas.width = this.el.clientWidth * window.devicePixelRatio;
+                        this.canvas.height = this.el.clientHeight * window.devicePixelRatio;
+                        this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
+                        this.originalImg = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                        this.canvas.classList.remove('hidden');
+                        this.el.querySelector('.tile-overlay').classList.add('hidden');
+                        this.el.querySelector('.tile-controls').classList.remove('hidden');
+                        this.mode = 'base';
+                        statusBar.innerText = `Captured Tile ${this.index}`;
+                    }, 300);
+                } catch (err) {
+                    statusBar.innerText = "Camera Error";
                 }
             }
-        });
 
-        canvas.addEventListener('mousemove', e => {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const mx = (e.clientX - rect.left) * scaleX;
-            const my = (e.clientY - rect.top) * scaleY;
-
-            if (isSelecting) {
-                selection.w = mx - selection.x;
-                selection.h = my - selection.y;
-                redraw();
-            } else if (isMoving) {
-                currentPos.x = mx - selection.w / 2;
-                currentPos.y = my - selection.h / 2;
-                redraw();
+            startSelection() {
+                this.mode = 'select';
+                this.el.querySelector('.btn-select').classList.add('hidden');
+                this.el.querySelector('.btn-lock').classList.remove('hidden');
+                statusBar.innerText = "Select Workbench Area";
             }
-        });
 
-        canvas.addEventListener('mouseup', () => {
-            isSelecting = false;
-            isMoving = false;
-        });
+            lockSelection() {
+                if (this.selection.w === 0) return;
+                this.cutout = this.ctx.getImageData(this.selection.x, this.selection.y, this.selection.w, this.selection.h);
+                this.currentPos = { x: this.selection.x, y: this.selection.y };
+                this.mode = 'move';
+                this.el.querySelector('.btn-lock').innerText = "DONE";
+                statusBar.innerText = "Drag to Move Workbench";
+            }
 
-        function redraw() {
-            ctx.putImageData(originalImage, 0, 0);
+            handleDown(e) {
+                if (this.mode === 'select') {
+                    const rect = this.canvas.getBoundingClientRect();
+                    this.selection.x = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+                    this.selection.y = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+                    this.isDragging = true;
+                } else if (this.mode === 'move') {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const mx = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+                    const my = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+                    if (mx >= this.currentPos.x && mx <= this.currentPos.x + this.selection.w &&
+                        my >= this.currentPos.y && my <= this.currentPos.y + this.selection.h) {
+                        this.isDragging = true;
+                    }
+                }
+            }
 
-            if (mode === 'select') {
-                ctx.strokeStyle = '#3b82f6';
-                ctx.lineWidth = 4;
-                ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
-                ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
-                ctx.fillRect(selection.x, selection.y, selection.w, selection.h);
-            } else if (mode === 'move') {
-                // Blur/Fill original area
-                ctx.fillStyle = '#111';
-                ctx.fillRect(selection.x, selection.y, selection.w, selection.h);
-                
-                // Draw cutout at new position
-                ctx.putImageData(workbenchCutout, currentPos.x, currentPos.y);
-                ctx.strokeStyle = '#10b981';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(currentPos.x, currentPos.y, selection.w, selection.h);
+            handleMove(e) {
+                if (!this.isDragging) return;
+                const rect = this.canvas.getBoundingClientRect();
+                const mx = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+                const my = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+
+                if (this.mode === 'select') {
+                    this.selection.w = mx - this.selection.x;
+                    this.selection.h = my - this.selection.y;
+                } else if (this.mode === 'move') {
+                    this.currentPos.x = mx - this.selection.w / 2;
+                    this.currentPos.y = my - this.selection.h / 2;
+                }
+                this.draw();
+            }
+
+            handleUp() {
+                this.isDragging = false;
+            }
+
+            draw() {
+                this.ctx.putImageData(this.originalImg, 0, 0);
+                if (this.mode === 'select') {
+                    this.ctx.strokeStyle = '#3b82f6';
+                    this.ctx.lineWidth = 4;
+                    this.ctx.strokeRect(this.selection.x, this.selection.y, this.selection.w, this.selection.h);
+                } else if (this.mode === 'move') {
+                    this.ctx.fillStyle = '#0f172a';
+                    this.ctx.fillRect(this.selection.x, this.selection.y, this.selection.w, this.selection.h);
+                    this.ctx.putImageData(this.cutout, this.currentPos.x, this.currentPos.y);
+                    this.ctx.strokeStyle = '#22c55e';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.strokeRect(this.currentPos.x, this.currentPos.y, this.selection.w, this.selection.h);
+                }
+            }
+
+            reset() {
+                this.mode = 'empty';
+                this.originalImg = null;
+                this.cutout = null;
+                this.selection = { x: 0, y: 0, w: 0, h: 0 };
+                this.renderEmpty();
             }
         }
 
-        lockBtn.addEventListener('click', () => {
-            if (mode !== 'select') return;
-            workbenchCutout = ctx.getImageData(selection.x, selection.y, selection.w, selection.h);
-            currentPos = { x: selection.x, y: selection.y };
-            mode = 'move';
-            status.innerText = "Status: Drag workbench to move it!";
-            downloadBtn.classList.remove('hidden');
-        });
+        const simInstances = Array.from(tiles).map((tile, idx) => new TileSimulator(tile, idx));
 
-        resetBtn.addEventListener('click', () => {
-            location.reload();
+        document.getElementById('global-reset').addEventListener('click', () => {
+            simInstances.forEach(s => s.reset());
+            statusBar.innerText = "Grid Reset";
         });
-
-        downloadBtn.addEventListener('click', () => {
-            const link = document.createElement('a');
-            link.download = 'new_workspace_layout.png';
-            link.href = canvas.toDataURL();
-            link.click();
-        });
-
-        startCamera();
     </script>
 </body>
 </html>
