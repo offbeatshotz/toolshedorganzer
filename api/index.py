@@ -8,53 +8,64 @@ from PIL import Image
 app = Flask(__name__, template_folder='../templates')
 
 def detect_workbenches(image):
-    # Convert to grayscale
+    # Convert to grayscale and detect edges
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # Use adaptive thresholding to handle varied lighting in sheds
-    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                 cv2.THRESH_BINARY_INV, 11, 2)
-    
-    # Morphological operations to close gaps in lines
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(blurred, 30, 150)
     
     # Find contours
-    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     detected = []
     output = image.copy()
-    h_img, w_img = image.shape[:2]
     
+    # Step 1: Find potential tops (horizontal rectangles)
+    potential_tops = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        # Filter out noise (too small) or the whole frame (too big)
-        if area < (w_img * h_img * 0.02) or area > (w_img * h_img * 0.8):
-            continue
-            
-        # Get bounding box
+        if area < 3000: continue
+        
         x, y, w, h = cv2.boundingRect(cnt)
         aspect_ratio = float(w)/h
         
-        # Heuristic for Workbenches/Tables/Desks:
-        # 1. Usually wider than they are tall (0.8 to 4.0 aspect ratio)
-        # 2. Usually located in the lower 2/3 of the image
-        if 0.7 < aspect_ratio < 5.0 and y > (h_img * 0.1):
-            # Refine the contour to see if it's rectangular-ish
-            peri = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
-            
-            # We are more permissive now: if it's a large enough boxy shape, we flag it
-            detected.append({
-                'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h), 
-                'type': 'Workbench/Surface'
-            })
-            
-            # Draw the detection
-            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(output, "Surface Detected", (x, y - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # Table tops are usually wider than they are tall
+        if aspect_ratio > 1.5:
+            potential_tops.append({'x': x, 'y': y, 'w': w, 'h': h, 'cnt': cnt})
 
+    # Step 2: For each top, look for legs beneath it
+    for top in potential_tops:
+        # Define search area for legs (directly below the top)
+        leg_search_y = top['y'] + top['h']
+        leg_search_h = int(top['h'] * 3) # Look down 3x the top's height
+        
+        # Look for vertical contours in the search area
+        legs_found = 0
+        for cnt in contours:
+            lx, ly, lw, lh = cv2.boundingRect(cnt)
+            
+            # Is this contour below the current top and within its horizontal span?
+            if (ly >= leg_search_y and ly <= leg_search_y + leg_search_h and 
+                lx >= top['x'] - 20 and lx + lw <= top['x'] + top['w'] + 20):
+                
+                # Legs are usually taller than they are wide
+                leg_aspect = float(lh)/lw if lw > 0 else 0
+                if leg_aspect > 1.2 and cv2.contourArea(cnt) > 500:
+                    legs_found += 1
+                    # Draw legs in a different color for debugging/visuals
+                    cv2.rectangle(output, (lx, ly), (lx + lw, ly + lh), (255, 165, 0), 2)
+
+        # Step 3: If it has a top and at least one leg-like structure, it's a workbench/table
+        if legs_found >= 1:
+            x, y, w, h = top['x'], top['y'], top['w'], top['h']
+            # Expand bounding box to include legs
+            total_h = leg_search_h + h
+            detected.append({'x': x, 'y': y, 'w': w, 'h': total_h, 'type': 'Workbench/Table'})
+            
+            # Draw main detection
+            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 3)
+            cv2.putText(output, f"Workbench (Legs: {legs_found})", (x, y - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
     return output, detected
 
 @app.route('/')
