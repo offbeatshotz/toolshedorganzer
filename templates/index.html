@@ -115,7 +115,6 @@
                 this.canvas.height = this.canvas.parentElement.clientHeight * window.devicePixelRatio;
                 this.background = imgData;
                 
-                // Enable Randomize button
                 randomizeBtn.disabled = false;
                 randomizeBtn.classList.remove('bg-slate-600', 'cursor-not-allowed', 'opacity-50');
                 randomizeBtn.classList.add('bg-blue-600', 'hover:bg-blue-500');
@@ -123,11 +122,22 @@
                 this.draw();
             }
 
-            addItem(item) {
-                item.x = this.canvas.width / 2 - item.w / 2;
-                item.y = this.canvas.height / 2 - item.h / 2;
-                masterItems.push(item);
+            addItemRandomly(itemData, w, h) {
+                if (!this.background) {
+                    statusBar.innerText = "Error: Snap your ROOM background first!";
+                    return;
+                }
+                const pad = 40;
+                const newItem = {
+                    data: itemData,
+                    w: w,
+                    h: h,
+                    x: pad + Math.random() * (this.canvas.width - w - pad * 2),
+                    y: pad + Math.random() * (this.canvas.height - h - pad * 2)
+                };
+                masterItems.push(newItem);
                 this.draw();
+                statusBar.innerText = "Workbench added to room at random spot!";
             }
 
             handleDown(e) {
@@ -171,23 +181,14 @@
             }
 
             randomize() {
-                if (!this.background) {
-                    statusBar.innerText = "Please snap a ROOM background first!";
-                    return;
-                }
-                if (masterItems.length === 0) {
-                    statusBar.innerText = "No workbenches to randomize!";
-                    return;
-                }
-                
+                if (!this.background || masterItems.length === 0) return;
                 const pad = 40;
                 masterItems.forEach(it => {
-                    // Smart randomization: stay within room bounds
                     it.x = pad + Math.random() * (this.canvas.width - it.w - pad * 2);
                     it.y = pad + Math.random() * (this.canvas.height - it.h - pad * 2);
                 });
                 this.draw();
-                statusBar.innerText = "Layout Randomized!";
+                statusBar.innerText = "Layout shuffled!";
             }
 
             reset() {
@@ -195,8 +196,6 @@
                 this.background = null;
                 this.canvas.classList.add('hidden');
                 roomPlaceholder.classList.remove('hidden');
-                
-                // Disable Randomize button
                 randomizeBtn.disabled = true;
                 randomizeBtn.classList.add('bg-slate-600', 'cursor-not-allowed', 'opacity-50');
                 randomizeBtn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
@@ -213,9 +212,10 @@
                 this.canvas.className = 'tile-canvas hidden';
                 this.ctx = this.canvas.getContext('2d');
                 this.el.appendChild(this.canvas);
-                this.mode = 'empty';
+                this.mode = 'empty'; // empty, preview, base
                 this.selection = { x: 0, y: 0, w: 0, h: 0 };
                 this.isSelecting = false;
+                this.capturedCutout = null;
                 this.renderEmpty();
                 this.initEvents();
             }
@@ -228,7 +228,8 @@
                     </div>
                     <div class="absolute bottom-1 left-1 right-1 flex gap-1 z-20">
                         <button class="btn-room control-btn bg-green-600 hidden">Set Room</button>
-                        <button class="btn-snap control-btn bg-blue-600 hidden">Snap Bench</button>
+                        <button class="btn-snap control-btn bg-blue-600 hidden">Capture</button>
+                        <button class="btn-add control-btn bg-orange-500 hidden">Add to Room</button>
                         <button class="btn-clear control-btn bg-slate-700 hidden">X</button>
                     </div>
                 `;
@@ -237,13 +238,17 @@
             }
 
             initEvents() {
-                this.el.addEventListener('click', e => { if (this.mode === 'empty') this.startPreview(); });
+                this.el.addEventListener('click', e => { 
+                    if (this.mode === 'empty') this.startPreview(); 
+                    else if (this.mode === 'base') this.addToRoom();
+                });
                 this.el.addEventListener('click', e => {
                     const btn = e.target.closest('button');
                     if (!btn) return;
                     e.stopPropagation();
                     if (btn.classList.contains('btn-room')) this.snapAsRoom();
-                    if (btn.classList.contains('btn-snap')) this.snapAsBench();
+                    if (btn.classList.contains('btn-snap')) this.captureWorkbench();
+                    if (btn.classList.contains('btn-add')) this.addToRoom();
                     if (btn.classList.contains('btn-clear')) this.reset();
                 });
                 this.canvas.addEventListener('mousedown', e => this.handleDown(e));
@@ -262,7 +267,10 @@
                     this.mode = 'preview';
                     this.el.classList.add('active');
                     this.canvas.classList.remove('hidden');
-                    this.el.querySelectorAll('.control-btn').forEach(b => b.classList.remove('hidden'));
+                    this.el.querySelector('.btn-room').classList.remove('hidden');
+                    this.el.querySelector('.btn-snap').classList.remove('hidden');
+                    this.el.querySelector('.btn-clear').classList.remove('hidden');
+                    
                     this.canvas.width = this.el.clientWidth * window.devicePixelRatio;
                     this.canvas.height = this.el.clientHeight * window.devicePixelRatio;
                     const loop = () => {
@@ -276,7 +284,7 @@
                         requestAnimationFrame(loop);
                     };
                     loop();
-                    statusBar.innerText = `Tile ${this.index} Live - Drag to frame workbench`;
+                    statusBar.innerText = `Tile ${this.index} Preview - Box your workbench`;
                 } catch (err) { statusBar.innerText = "Camera Error"; }
             }
 
@@ -301,26 +309,43 @@
             snapAsRoom() {
                 const data = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
                 room.setBackground(data);
-                statusBar.innerText = "Master Room Background Set!";
+                this.reset();
+                statusBar.innerText = "Master Room Snap captured!";
             }
 
-            snapAsBench() {
+            captureWorkbench() {
                 if (Math.abs(this.selection.w) < 10) {
-                    statusBar.innerText = "Drag a box on the video first!";
+                    statusBar.innerText = "Drag a box on the feed first!";
                     return;
                 }
                 const sx = this.selection.w > 0 ? this.selection.x : this.selection.x + this.selection.w;
                 const sy = this.selection.h > 0 ? this.selection.y : this.selection.y + this.selection.h;
                 const sw = Math.abs(this.selection.w);
                 const sh = Math.abs(this.selection.h);
-                const data = this.ctx.getImageData(sx, sy, sw, sh);
-                room.addItem({ data, w: sw, h: sh });
-                statusBar.innerText = "Workbench added to Room!";
-                this.selection = { x: 0, y: 0, w: 0, h: 0 };
+
+                this.capturedCutout = this.ctx.getImageData(sx, sy, sw, sh);
+                this.mode = 'base';
+                
+                // Redraw tile with just the cutout
+                this.canvas.width = sw;
+                this.canvas.height = sh;
+                this.ctx.putImageData(this.capturedCutout, 0, 0);
+                
+                this.el.querySelector('.btn-snap').classList.add('hidden');
+                this.el.querySelector('.btn-room').classList.add('hidden');
+                this.el.querySelector('.btn-add').classList.remove('hidden');
+                
+                statusBar.innerText = "Workbench saved to Tile! Click tile to add to Room.";
+            }
+
+            addToRoom() {
+                if (!this.capturedCutout) return;
+                room.addItemRandomly(this.capturedCutout, this.capturedCutout.width, this.capturedCutout.height);
             }
 
             reset() {
                 this.mode = 'empty';
+                this.capturedCutout = null;
                 this.el.classList.remove('active');
                 this.renderEmpty();
             }
