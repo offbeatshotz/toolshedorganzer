@@ -23,13 +23,14 @@
                 <h2 class="text-xl font-semibold mb-4">Controls</h2>
                 <div class="space-y-4">
                     <button id="snap" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition">
-                        Capture & Detect
+                        Capture & AI Detect
                     </button>
+                    <p class="text-xs text-gray-400 text-center italic">OR click on the image below to manually select a workbench area</p>
                     <button id="clear" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded transition">
-                        Clear Simulations
+                        Reset View
                     </button>
                     <div class="mt-6">
-                        <label class="block text-sm font-medium mb-1">Item to Add</label>
+                        <label class="block text-sm font-medium mb-1">Add Simulation Item</label>
                         <select id="itemType" class="w-full bg-gray-700 rounded p-2">
                             <option>Shelf</option>
                             <option>Tool Rack</option>
@@ -43,10 +44,11 @@
             </div>
 
             <!-- Viewport -->
-            <div class="md:col-span-2 relative bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700">
+            <div class="md:col-span-2 relative bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700 cursor-crosshair">
                 <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
                 <canvas id="canvas" class="hidden"></canvas>
                 <img id="result" class="hidden w-full h-full object-cover">
+                <div id="manual-overlay" class="absolute inset-0"></div>
             </div>
         </div>
 
@@ -62,6 +64,8 @@
         const resultImg = document.getElementById('result');
         const status = document.getElementById('status');
         const resultsList = document.getElementById('results-list');
+        const manualOverlay = document.getElementById('manual-overlay');
+        let detections = [];
 
         // Access Camera
         async function initCamera() {
@@ -73,8 +77,52 @@
             }
         }
 
+        // Manual Selection Logic
+        manualOverlay.addEventListener('mousedown', (e) => {
+            if (video.classList.contains('hidden') && !resultImg.classList.contains('hidden')) {
+                const rect = manualOverlay.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width * resultImg.naturalWidth;
+                const y = (e.clientY - rect.top) / rect.height * resultImg.naturalHeight;
+                
+                // Add a manual workbench box
+                const manualBox = {
+                    x: x - 100,
+                    y: y - 50,
+                    w: 200,
+                    h: 100,
+                    type: 'Manual Workbench'
+                };
+                detections.push(manualBox);
+                updateDetectionsUI();
+                drawManualBox(e.clientX - rect.left, e.clientY - rect.top);
+            }
+        });
+
+        function drawManualBox(x, y) {
+            const box = document.createElement('div');
+            box.style.left = `${x - 50}px`;
+            box.style.top = `${y - 25}px`;
+            box.style.width = '100px';
+            box.style.height = '50px';
+            box.className = "absolute border-2 border-blue-500 bg-blue-500 bg-opacity-20 pointer-events-none";
+            manualOverlay.appendChild(box);
+        }
+
+        function updateDetectionsUI() {
+            resultsList.innerHTML = '';
+            detections.forEach((d, i) => {
+                const div = document.createElement('div');
+                div.className = "bg-gray-800 p-3 rounded border border-green-500 relative";
+                div.innerHTML = `
+                    <span class='font-bold text-green-400'>#${i+1} ${d.type}</span><br>
+                    Size: ${Math.round(d.w)}x${Math.round(d.h)}
+                `;
+                resultsList.appendChild(div);
+            });
+        }
+
         snap.addEventListener('click', async () => {
-            status.innerText = "Processing...";
+            status.innerText = "AI is scanning for surfaces...";
             const context = canvas.getContext('2d');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -94,17 +142,15 @@
                     resultImg.src = data.image;
                     resultImg.classList.remove('hidden');
                     video.classList.add('hidden');
-                    status.innerText = `Detected ${data.detections.length} potential workbenches!`;
+                    detections = data.detections;
                     
-                    // Display detections
-                    resultsList.innerHTML = '';
-                    data.detections.forEach((d, i) => {
-                        const div = document.createElement('div');
-                        div.className = "bg-gray-800 p-3 rounded border border-green-500";
-                        const label = d.type || 'Workbench';
-                        div.innerHTML = `<span class='font-bold text-green-400'>#${i+1} ${label}</span><br>Size: ${d.w}x${d.h}`;
-                        resultsList.appendChild(div);
-                    });
+                    if (detections.length === 0) {
+                        status.innerText = "AI missed it! Click on the image to manually place a workbench.";
+                    } else {
+                        status.innerText = `AI detected ${detections.length} surfaces! You can also click to add more.`;
+                    }
+                    
+                    updateDetectionsUI();
                 }
             } catch (err) {
                 status.innerText = "Error processing image";
@@ -115,6 +161,8 @@
             resultImg.classList.add('hidden');
             video.classList.remove('hidden');
             resultsList.innerHTML = '';
+            manualOverlay.innerHTML = '';
+            detections = [];
             status.innerText = "";
         });
 
