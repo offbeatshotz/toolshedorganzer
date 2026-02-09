@@ -1,38 +1,32 @@
-# 🛠️ Workbench Re-positioner Simulator
+# 🛠️ Workbench Re-positioner Simulator (Vercel Edition)
 
-A Python web application that uses your camera to virtually move and reposition workbenches in your workspace.
+A web application optimized for Vercel that allows you to virtually move and reposition workbenches in your workspace using your camera.
 
 ## 🚀 Features
-- **Live Camera Capture:** Take a photo of your actual workspace.
-- **Workbench Selection:** Use interactive sliders to select the exact area of your workbench.
-- **Virtual Repositioning:** Move the selected workbench to any new location in the room.
-- **Visual Simulation:** Automatically blurs the original location to show what the room looks like with the workbench moved.
-- **Export Plan:** Download your new layout as a PNG image.
+- **Live Camera Capture:** Snap photos directly in the browser.
+- **Interactive Cutout:** Drag a box to select exactly what you want to move.
+- **Real-time Drag & Drop:** Move your workbench cutout around the room instantly.
+- **Fast & Lightweight:** Built with Flask and Vanilla JS for zero lag.
 
-## 🛠️ Installation & Local Run
-1. Clone the repository:
-   ```bash
-   git clone <your-repo-url>
-   cd toolshed-organizer
-   ```
-2. Install dependencies:
+## 🌐 Deployment to Vercel
+1. Push your code to a GitHub repository.
+2. Go to [Vercel](https://vercel.com/).
+3. Import your GitHub repository.
+4. Vercel will automatically detect the Flask project (via `api/index.py`).
+5. Click **Deploy**!
+
+## 🛠️ Local Development
+1. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the app:
+2. Run the development server:
    ```bash
-   streamlit run app.py
+   python api/index.py
    ```
+3. Open `http://localhost:5000` in your browser.
 
-## 🌐 Deployment to GitHub & Streamlit Cloud
-1. Push your code to a GitHub repository.
-2. Go to [Streamlit Cloud](https://share.streamlit.io/).
-3. Connect your GitHub account and select this repository.
-4. Set the main file path to `app.py`.
-5. Click **Deploy**!
-
-## 📦 Dependencies
-- `streamlit`
-- `opencv-python-headless`
-- `numpy`
-- `Pillow`
+## 📂 Project Structure
+- `api/index.py`: Flask backend entry point for Vercel.
+- `templates/index.html`: The core logic (Camera, Canvas, Drag & Drop).
+- `vercel.json`: Deployment configuration.

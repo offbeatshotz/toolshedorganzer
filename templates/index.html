@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workbench Move Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #canvas-container { position: relative; display: inline-block; }
+        canvas { border: 2px solid #333; cursor: crosshair; max-width: 100%; height: auto; }
+        .controls { background: #1a1a1a; color: white; padding: 20px; border-radius: 10px; }
+        #video { display: none; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 md:p-8">
+    <div class="max-w-6xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-green-400">🛠️ Workbench Re-positioner</h1>
+            <p class="text-gray-400 mt-2">Vercel Edition • Drag to move your workspace</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            <!-- Sidebar Controls -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="controls shadow-xl">
+                    <h2 class="text-xl font-semibold mb-4 text-green-400">1. Capture</h2>
+                    <button id="capture-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition mb-4 flex items-center justify-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        </svg>
+                        Snap Photo
+                    </button>
+                    
+                    <h2 class="text-xl font-semibold mb-4 text-green-400">2. Select</h2>
+                    <p class="text-xs text-gray-400 mb-2 italic">Drag a box over your workbench to "cut" it out.</p>
+                    <button id="lock-selection" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition mb-4">
+                        Lock Selection
+                    </button>
+
+                    <h2 class="text-xl font-semibold mb-4 text-green-400">3. Move</h2>
+                    <p class="text-xs text-gray-400 mb-2 italic">Now drag the cutout to a new spot!</p>
+                    
+                    <button id="reset-btn" class="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition mt-8">
+                        Reset All
+                    </button>
+                </div>
+                
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <h3 class="font-bold text-sm uppercase text-gray-500 mb-2">Instructions</h3>
+                    <ul class="text-xs space-y-2 text-gray-300">
+                        <li>📸 Click <b>Snap Photo</b> to start.</li>
+                        <li>🖱️ <b>Drag</b> a rectangle over your workbench.</li>
+                        <li>🔒 Click <b>Lock Selection</b>.</li>
+                        <li>🚀 <b>Drag</b> the workbench to its new position!</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Main Workspace -->
+            <div class="lg:col-span-3">
+                <div id="canvas-container" class="w-full bg-black rounded-xl overflow-hidden shadow-2xl flex justify-center items-center min-h-[400px]">
+                    <video id="video" autoplay playsinline></video>
+                    <canvas id="canvas"></canvas>
+                    <div id="loading-hint" class="absolute text-gray-500 text-center">
+                        <p>Camera feed will appear here...</p>
+                    </div>
+                </div>
+                <div class="mt-4 flex justify-between items-center text-sm text-gray-500">
+                    <span id="status">Status: Waiting for camera...</span>
+                    <button id="download-btn" class="text-green-400 hover:text-green-300 font-bold hidden">
+                        Download Result ↓
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+        const captureBtn = document.getElementById('capture-btn');
+        const lockBtn = document.getElementById('lock-selection');
+        const resetBtn = document.getElementById('reset-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const hint = document.getElementById('loading-hint');
+
+        let originalImage = null;
+        let workbenchCutout = null;
+        let isSelecting = false;
+        let isMoving = false;
+        let selection = { x: 0, y: 0, w: 0, h: 0 };
+        let currentPos = { x: 0, y: 0 };
+        let mode = 'idle'; // idle, capture, select, move
+
+        // Initialize Camera
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                video.style.display = 'block';
+                hint.style.display = 'none';
+                mode = 'capture';
+                status.innerText = "Status: Ready to snap!";
+            } catch (err) {
+                status.innerText = "Error: Camera access denied";
+                console.error(err);
+            }
+        }
+
+        captureBtn.addEventListener('click', () => {
+            if (mode !== 'capture') return;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            originalImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            video.style.display = 'none';
+            mode = 'select';
+            status.innerText = "Status: Drag to select workbench area";
+        });
+
+        canvas.addEventListener('mousedown', e => {
+            if (mode === 'select') {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                selection.x = (e.clientX - rect.left) * scaleX;
+                selection.y = (e.clientY - rect.top) * scaleY;
+                isSelecting = true;
+            } else if (mode === 'move') {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const mx = (e.clientX - rect.left) * scaleX;
+                const my = (e.clientY - rect.top) * scaleY;
+
+                // Check if clicking inside the workbench
+                if (mx >= currentPos.x && mx <= currentPos.x + selection.w &&
+                    my >= currentPos.y && my <= currentPos.y + selection.h) {
+                    isMoving = true;
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const mx = (e.clientX - rect.left) * scaleX;
+            const my = (e.clientY - rect.top) * scaleY;
+
+            if (isSelecting) {
+                selection.w = mx - selection.x;
+                selection.h = my - selection.y;
+                redraw();
+            } else if (isMoving) {
+                currentPos.x = mx - selection.w / 2;
+                currentPos.y = my - selection.h / 2;
+                redraw();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isSelecting = false;
+            isMoving = false;
+        });
+
+        function redraw() {
+            ctx.putImageData(originalImage, 0, 0);
+
+            if (mode === 'select') {
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+                ctx.fillRect(selection.x, selection.y, selection.w, selection.h);
+            } else if (mode === 'move') {
+                // Blur/Fill original area
+                ctx.fillStyle = '#111';
+                ctx.fillRect(selection.x, selection.y, selection.w, selection.h);
+                
+                // Draw cutout at new position
+                ctx.putImageData(workbenchCutout, currentPos.x, currentPos.y);
+                ctx.strokeStyle = '#10b981';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(currentPos.x, currentPos.y, selection.w, selection.h);
+            }
+        }
+
+        lockBtn.addEventListener('click', () => {
+            if (mode !== 'select') return;
+            workbenchCutout = ctx.getImageData(selection.x, selection.y, selection.w, selection.h);
+            currentPos = { x: selection.x, y: selection.y };
+            mode = 'move';
+            status.innerText = "Status: Drag workbench to move it!";
+            downloadBtn.classList.remove('hidden');
+        });
+
+        resetBtn.addEventListener('click', () => {
+            location.reload();
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'new_workspace_layout.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+
+        startCamera();
+    </script>
+</body>
+</html>
