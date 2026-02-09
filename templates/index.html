@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Toolshed AI - Vercel Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+        canvas { max-width: 100%; height: auto; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-4">
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-green-400">🛠️ Toolshed AI</h1>
+            <p class="text-gray-400">Detect workbenches and simulate your layout</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <!-- Controls -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-4">Controls</h2>
+                <div class="space-y-4">
+                    <button id="snap" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition">
+                        Capture & Detect
+                    </button>
+                    <button id="clear" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded transition">
+                        Clear Simulations
+                    </button>
+                    <div class="mt-6">
+                        <label class="block text-sm font-medium mb-1">Item to Add</label>
+                        <select id="itemType" class="w-full bg-gray-700 rounded p-2">
+                            <option>Shelf</option>
+                            <option>Tool Rack</option>
+                            <option>Storage Bin</option>
+                            <option>Cabinet</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div id="status" class="mt-4 text-sm text-yellow-400"></div>
+            </div>
+
+            <!-- Viewport -->
+            <div class="md:col-span-2 relative bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700">
+                <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
+                <canvas id="canvas" class="hidden"></canvas>
+                <img id="result" class="hidden w-full h-full object-cover">
+            </div>
+        </div>
+
+        <div id="results-list" class="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Detection results will appear here -->
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const snap = document.getElementById('snap');
+        const resultImg = document.getElementById('result');
+        const status = document.getElementById('status');
+        const resultsList = document.getElementById('results-list');
+
+        // Access Camera
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+            } catch (err) {
+                status.innerText = "Error: Camera access denied";
+            }
+        }
+
+        snap.addEventListener('click', async () => {
+            status.innerText = "Processing...";
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const imageData = canvas.toDataURL('image/jpeg');
+            
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageData })
+                });
+                
+                const data = await response.json();
+                if (data.image) {
+                    resultImg.src = data.image;
+                    resultImg.classList.remove('hidden');
+                    video.classList.add('hidden');
+                    status.innerText = `Detected ${data.detections.length} potential workbenches!`;
+                    
+                    // Display detections
+                    resultsList.innerHTML = '';
+                    data.detections.forEach((d, i) => {
+                        const div = document.createElement('div');
+                        div.className = "bg-gray-800 p-3 rounded border border-green-500";
+                        div.innerHTML = `<span class='font-bold text-green-400'>#${i+1} Workbench</span><br>Size: ${d.w}x${d.h}`;
+                        resultsList.appendChild(div);
+                    });
+                }
+            } catch (err) {
+                status.innerText = "Error processing image";
+            }
+        });
+
+        document.getElementById('clear').addEventListener('click', () => {
+            resultImg.classList.add('hidden');
+            video.classList.remove('hidden');
+            resultsList.innerHTML = '';
+            status.innerText = "";
+        });
+
+        initCamera();
+    </script>
+</body>
+</html>
