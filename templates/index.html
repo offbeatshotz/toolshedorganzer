@@ -101,7 +101,8 @@
                     data.detections.forEach((d, i) => {
                         const div = document.createElement('div');
                         div.className = "bg-gray-800 p-3 rounded border border-green-500";
-                        div.innerHTML = `<span class='font-bold text-green-400'>#${i+1} Workbench</span><br>Size: ${d.w}x${d.h}`;
+                        const label = d.type || 'Workbench';
+                        div.innerHTML = `<span class='font-bold text-green-400'>#${i+1} ${label}</span><br>Size: ${d.w}x${d.h}`;
                         resultsList.appendChild(div);
                     });
                 }
